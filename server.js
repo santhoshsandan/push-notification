@@ -6,7 +6,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // MQTT Broker Details
-const MQTT_BROKER = "mqtt://test.mosquitto.org"; // Update if needed
+const MQTT_BROKER = "mqtt://test.mosquitto.org";
 const MQTT_TOPIC = "devices/esp01/get/data";
 
 const sensorLabels = {
@@ -28,12 +28,14 @@ const sensorLabels = {
   reg20: "Soda Ash Pump Trip",
   reg21: "Chlorine Tank level = Low",
   reg22: "HCL Tank level = Low",
-  reg23: "Soda Ash Tank level = Low"
+  reg23: "Soda Ash Tank level = Low",
 };
+
+// Store last 20 notifications
+let notifications = [];
 
 // Connect to MQTT broker
 const client = mqtt.connect(MQTT_BROKER);
-let lastMessage = {};
 
 client.on("connect", () => {
   console.log("Connected to MQTT broker");
@@ -46,34 +48,27 @@ client.on("message", (topic, message) => {
     const modbusData = data?.data?.modbus?.[0] || {};
 
     Object.keys(modbusData).forEach((key) => {
-      const currentValue = modbusData[key];
-      const previousValue = lastMessage[key];
+      const label = sensorLabels[key];
+      if (label && modbusData[key] === 1) {
+        const notification = { message: label, timestamp: new Date() };
+        console.log("Sending notification:", notification.message);
 
-      if (
-        currentValue !== previousValue &&
-        (
-          (key.startsWith("reg") && parseInt(key.replace("reg", ""), 10) <= 4) || // reg1 to reg4: any change
-          (currentValue === 1 && parseInt(key.replace("reg", ""), 10) >= 5 && parseInt(key.replace("reg", ""), 10) <= 23) // reg5 to reg23: only when value is 1
-        )
-      ) {
-        const label = sensorLabels[key];
-        if (label) {
-          sendNotification(label);
+        // Store notification (only keep last 20 messages)
+        notifications.push(notification);
+        if (notifications.length > 20) {
+          notifications.shift(); // Remove the oldest message
         }
       }
     });
-
-    lastMessage = modbusData;
   } catch (error) {
     console.error("Error processing MQTT message:", error);
   }
 });
 
-// Function to send notification
-function sendNotification(message) {
-  console.log("Sending notification:", message);
-  // Here, you can integrate Firebase, Twilio, or another push notification service
-}
+// API to get notifications
+app.get("/notifications", (req, res) => {
+  res.json({ notifications });
+});
 
 // Express server
 app.get("/", (req, res) => {
